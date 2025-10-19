@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-app
+  namespace: mock-app
+  labels:
+    app: mock-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mock-app
+  template:
+    metadata:
+      labels:
+        app: mock-app
+    spec:
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: mock-app
+        image: 410775200492.dkr.ecr.ap-southeast-1.amazonaws.com/mock-app:latest
+        imagePullPolicy: Always
+        
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        
+        # Environment variables from secret
+        envFrom:
+        - secretRef:
+            name: db-credentials
+        
+        # Resource limits
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        # Security context for container
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      
+      # Restart policy
+      restartPolicy: Always

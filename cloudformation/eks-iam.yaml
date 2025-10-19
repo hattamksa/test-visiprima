@@ -1,0 +1,172 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'EKS IAM Resources - Prerequisites for Terraform EKS Setup'
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: my-eks-cluster
+    Description: Name of the EKS cluster
+
+Resources:
+  # EKS Cluster IAM Role
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ClusterName}-cluster-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSVPCResourceController
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-cluster-role'
+
+  # EKS Node Group IAM Role
+  EKSNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ClusterName}-node-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-node-role'
+
+  # Instance Profile for Node Group
+  EKSNodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${ClusterName}-node-instance-profile'
+      Roles:
+        - !Ref EKSNodeRole
+
+  # OIDC Provider Policy for Service Accounts
+  EKSClusterOIDCProviderPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub '${ClusterName}-oidc-provider-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Resource: '*'
+      Roles:
+        - !Ref EKSClusterRole
+
+  # EBS CSI Driver IAM Role (for persistent volumes)
+  EKSEBSCSIRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ClusterName}-ebs-csi-driver-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-ebs-csi-driver-role'
+
+  # Additional policy for EKS cluster encryption
+  EKSClusterEncryptionPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: !Sub '${ClusterName}-encryption-policy'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:CreateGrant
+              - kms:DescribeKey
+            Resource: '*'
+      Roles:
+        - !Ref EKSClusterRole
+
+  # Terraform Backend Access Role (optional - for CI/CD)
+  TerraformExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ClusterName}-terraform-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: TerraformEKSPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:*
+                  - ec2:*
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:ListAttachedRolePolicies
+                  - autoscaling:*
+                  - elasticloadbalancing:*
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-terraform-execution-role'
+
+Outputs:
+  EKSClusterRoleArn:
+    Description: ARN of the EKS Cluster IAM Role
+    Value: !GetAtt EKSClusterRole.Arn
+    Export:
+      Name: !Sub '${ClusterName}-cluster-role-arn'
+
+  EKSNodeRoleArn:
+    Description: ARN of the EKS Node Group IAM Role
+    Value: !GetAtt EKSNodeRole.Arn
+    Export:
+      Name: !Sub '${ClusterName}-node-role-arn'
+
+  EKSNodeInstanceProfileArn:
+    Description: ARN of the EKS Node Instance Profile
+    Value: !GetAtt EKSNodeInstanceProfile.Arn
+    Export:
+      Name: !Sub '${ClusterName}-node-instance-profile-arn'
+
+  EKSEBSCSIRoleArn:
+    Description: ARN of the EBS CSI Driver IAM Role
+    Value: !GetAtt EKSEBSCSIRole.Arn
+    Export:
+      Name: !Sub '${ClusterName}-ebs-csi-role-arn'
+
+  TerraformExecutionRoleArn:
+    Description: ARN of the Terraform Execution Role
+    Value: !GetAtt TerraformExecutionRole.Arn
+    Export:
+      Name: !Sub '${ClusterName}-terraform-role-arn'

@@ -1,0 +1,334 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'RDS Instance in Private VPC with Security Groups'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    Description: Environment name prefix
+
+  VpcCIDR:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for VPC
+
+  PrivateSubnet1CIDR:
+    Type: String
+    Default: 10.0.10.0/24
+    Description: CIDR block for private subnet 1
+
+  PrivateSubnet2CIDR:
+    Type: String
+    Default: 10.0.11.0/24
+    Description: CIDR block for private subnet 2
+
+  DBInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues:
+      - db.t4g.micro
+      - db.t3.micro
+      - db.t4g.small
+      - db.t3.small
+    Description: RDS instance type (db.t4g.micro is cheapest)
+
+  DBName:
+    Type: String
+    Default: mydatabase
+    Description: Database name
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBUsername:
+    Type: String
+    Default: admin
+    Description: Database master username
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: Database master password
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9]*'
+
+  DBAllocatedStorage:
+    Type: Number
+    Default: 20
+    Description: Allocated storage size in GB
+    MinValue: 20
+    MaxValue: 65536
+
+  DBEngine:
+    Type: String
+    Default: mysql
+    AllowedValues:
+      - mysql
+    Description: Database engine type
+
+  DBEngineVersion:
+    Type: String
+    Default: '8.0'
+    Description: Database engine version
+
+  MultiAZ:
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    Description: Enable Multi-AZ deployment
+
+  BackupRetentionPeriod:
+    Type: Number
+    Default: 7
+    Description: Number of days to retain automated backups
+    MinValue: 0
+    MaxValue: 35
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-vpc'
+
+  # Internet Gateway (for NAT Gateway connectivity)
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-igw'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Private Subnets
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-private-subnet-1'
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-private-subnet-2'
+
+  # Route Tables
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-private-routes'
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub '${EnvironmentName}-db-subnet-group'
+      DBSubnetGroupDescription: Subnet group for RDS database
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-db-subnet-group'
+
+  # Security Group for RDS
+  DBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-db-sg'
+      GroupDescription: Security group for RDS database
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref VpcCIDR
+          Description: Allow MySQL connections from VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-db-sg'
+
+  # Security Group for Application Layer
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-app-sg'
+      GroupDescription: Security group for application servers
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          DestinationSecurityGroupId: !Ref DBSecurityGroup
+          Description: Allow outbound to MySQL database
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-app-sg'
+
+  # DB Parameter Group for MySQL
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      DBParameterGroupName: !Sub '${EnvironmentName}-db-params'
+      Description: Parameter group for MySQL
+      Family: mysql8.0
+      Parameters:
+        max_connections: '100'
+        character_set_server: utf8mb4
+        collation_server: utf8mb4_unicode_ci
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-db-params'
+
+  # RDS Instance
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${EnvironmentName}-db-instance'
+      DBName: !Ref DBName
+      Engine: !Ref DBEngine
+      EngineVersion: !Ref DBEngineVersion
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DBSecurityGroup
+      DBParameterGroupName: !Ref DBParameterGroup
+      MultiAZ: !Ref MultiAZ
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      EnableCloudwatchLogsExports:
+        - error
+        - general
+        - slowquery
+      DeletionProtection: true
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-db-instance'
+
+  # Secrets Manager Secret for DB Credentials
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${EnvironmentName}/rds/credentials'
+      Description: RDS database credentials
+      SecretString: !Sub |
+        {
+          "username": "${DBUsername}",
+          "password": "${DBPassword}",
+          "engine": "${DBEngine}",
+          "host": "${DBInstance.Endpoint.Address}",
+          "port": ${DBInstance.Endpoint.Port},
+          "dbname": "${DBName}"
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-db-secret'
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${EnvironmentName}-vpc-id'
+
+  PrivateSubnet1Id:
+    Description: Private Subnet 1 ID
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub '${EnvironmentName}-private-subnet-1-id'
+
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub '${EnvironmentName}-private-subnet-2-id'
+
+  DBSecurityGroupId:
+    Description: Database Security Group ID
+    Value: !Ref DBSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-db-sg-id'
+
+  AppSecurityGroupId:
+    Description: Application Security Group ID
+    Value: !Ref AppSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-app-sg-id'
+
+  DBInstanceEndpoint:
+    Description: RDS Instance Endpoint
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${EnvironmentName}-db-endpoint'
+
+  DBInstancePort:
+    Description: RDS Instance Port
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${EnvironmentName}-db-port'
+
+  DBInstanceIdentifier:
+    Description: RDS Instance Identifier
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub '${EnvironmentName}-db-identifier'
+
+  DBSecretArn:
+    Description: ARN of the Secrets Manager secret containing DB credentials
+    Value: !Ref DBSecret
+    Export:
+      Name: !Sub '${EnvironmentName}-db-secret-arn'

@@ -1,0 +1,61 @@
+{
+    "VpcPeeringConnections": [
+        {
+            "AccepterVpcInfo": {
+                "CidrBlock": "10.0.0.0/16",
+                "CidrBlockSet": [
+                    {
+                        "CidrBlock": "10.0.0.0/16"
+                    }
+                ],
+                "OwnerId": "410775200492",
+                "PeeringOptions": {
+                    "AllowDnsResolutionFromRemoteVpc": false,
+                    "AllowEgressFromLocalClassicLinkToRemoteVpc": false,
+                    "AllowEgressFromLocalVpcToRemoteClassicLink": false
+                },
+                "VpcId": "vpc-0aa7dcf238dd6c54b",
+                "Region": "ap-southeast-1"
+            },
+            "RequesterVpcInfo": {
+                "CidrBlock": "10.10.0.0/16",
+                "CidrBlockSet": [
+                    {
+                        "CidrBlock": "10.10.0.0/16"
+                    }
+                ],
+                "OwnerId": "410775200492",
+                "PeeringOptions": {
+                    "AllowDnsResolutionFromRemoteVpc": false,
+                    "AllowEgressFromLocalClassicLinkToRemoteVpc": false,
+                    "AllowEgressFromLocalVpcToRemoteClassicLink": false
+                },
+                "VpcId": "vpc-01348d8d44f1d3763",
+                "Region": "ap-southeast-1"
+            },
+            "Status": {
+                "Code": "active",
+                "Message": "Active"
+            },
+            "Tags": [
+                {
+                    "Key": "Name",
+                    "Value": "staging-eks-to-rds-peering"
+                },
+                {
+                    "Key": "Project",
+                    "Value": "myapp"
+                },
+                {
+                    "Key": "ManagedBy",
+                    "Value": "Terraform"
+                },
+                {
+                    "Key": "Environment",
+                    "Value": "staging"
+                }
+            ],
+            "VpcPeeringConnectionId": "pcx-0ace59eb54ebc00d5"
+        }
+    ]
+}

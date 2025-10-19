@@ -1,0 +1,49 @@
+# AWS Configuration
+aws_region = "us-east-1"
+project_name = "myapp"
+
+# EKS Configuration
+cluster_version = "1.28"
+availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+# VPC Configuration per environment
+vpc_cidr = {
+  staging    = "10.1.0.0/16"
+  production = "10.2.0.0/16"
+}
+
+# Node Group Configuration
+node_groups = {
+  staging = {
+    desired_size   = 2
+    min_size       = 1
+    max_size       = 4
+    instance_types = ["t3.medium"]
+    capacity_type  = "ON_DEMAND"
+    disk_size      = 50
+  }
+  production = {
+    desired_size   = 3
+    min_size       = 2
+    max_size       = 10
+    instance_types = ["t3.large"]
+    capacity_type  = "ON_DEMAND"
+    disk_size      = 100
+  }
+}
+
+# RDS VPC Configuration (from RDS Terraform outputs)
+rds_vpc_id = {
+  staging    = "vpc-xxxxxxxxx"  # Replace with actual staging RDS VPC ID
+  production = "vpc-yyyyyyyyy"  # Replace with actual production RDS VPC ID
+}
+
+rds_vpc_cidr = {
+  staging    = "10.0.0.0/16"  # Replace with actual staging RDS VPC CIDR
+  production = "10.3.0.0/16"  # Replace with actual production RDS VPC CIDR
+}
+
+rds_security_group_id = {
+  staging    = "sg-xxxxxxxxx"  # Replace with actual staging RDS security group ID
+  production = "sg-yyyyyyyyy"  # Replace with actual production RDS security group ID
+}

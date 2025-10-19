@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'DynamoDB table for Terraform state locking'
+
+Parameters:
+  TableName:
+    Type: String
+    Default: terraform-state-lock
+    Description: Name of the DynamoDB table for Terraform state locking
+    MinLength: 3
+    MaxLength: 255
+    AllowedPattern: '[a-zA-Z0-9._-]+'
+    ConstraintDescription: Must contain only alphanumeric characters, dots, dashes, or underscores
+
+  BillingMode:
+    Type: String
+    Default: PAY_PER_REQUEST
+    AllowedValues:
+      - PAY_PER_REQUEST
+      - PROVISIONED
+    Description: Billing mode for the DynamoDB table
+
+  ReadCapacityUnits:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 40000
+    Description: Read capacity units (only used if BillingMode is PROVISIONED)
+
+  WriteCapacityUnits:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 40000
+    Description: Write capacity units (only used if BillingMode is PROVISIONED)
+
+  EnablePointInTimeRecovery:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable point-in-time recovery for the table
+
+  Environment:
+    Type: String
+    Default: shared
+    Description: Environment name
+    AllowedValues:
+      - shared
+      - staging
+      - production
+
+Conditions:
+  IsProvisionedBilling: !Equals [!Ref BillingMode, PROVISIONED]
+  EnablePITR: !Equals [!Ref EnablePointInTimeRecovery, 'true']
+
+Resources:
+  TerraformStateLockTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: !Ref BillingMode
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+      ProvisionedThroughput: !If
+        - IsProvisionedBilling
+        - ReadCapacityUnits: !Ref ReadCapacityUnits
+          WriteCapacityUnits: !Ref WriteCapacityUnits
+        - !Ref AWS::NoValue
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If
+          - EnablePITR
+          - true
+          - false
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      Tags:
+        - Key: Name
+          Value: !Ref TableName
+        - Key: Purpose
+          Value: Terraform State Locking
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # CloudWatch Alarm for Read Throttle Events
+  ReadThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProvisionedBilling
+    Properties:
+      AlarmName: !Sub '${TableName}-read-throttle'
+      AlarmDescription: Alert when read capacity is being throttled
+      MetricName: ReadThrottleEvents
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: TableName
+          Value: !Ref TerraformStateLockTable
+
+  # CloudWatch Alarm for Write Throttle Events
+  WriteThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: IsProvisionedBilling
+    Properties:
+      AlarmName: !Sub '${TableName}-write-throttle'
+      AlarmDescription: Alert when write capacity is being throttled
+      MetricName: WriteThrottleEvents
+      Namespace: AWS/DynamoDB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: TableName
+          Value: !Ref TerraformStateLockTable
+
+Outputs:
+  TableName:
+    Description: Name of the DynamoDB table
+    Value: !Ref TerraformStateLockTable
+    Export:
+      Name: !Sub '${AWS::StackName}-TableName'
+
+  TableArn:
+    Description: ARN of the DynamoDB table
+    Value: !GetAtt TerraformStateLockTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TableArn'
+
+  TableStreamArn:
+    Description: Stream ARN of the DynamoDB table
+    Value: !GetAtt TerraformStateLockTable.StreamArn
+    Condition: IsProvisionedBilling
+    Export:
+      Name: !Sub '${AWS::StackName}-TableStreamArn'
+
+  BillingMode:
+    Description: Billing mode of the table
+    Value: !Ref BillingMode
+
+  TerraformBackendConfig:
+    Description: Terraform backend configuration snippet
+    Value: !Sub |
+      terraform {
+        backend "s3" {
+          bucket         = "your-terraform-state-bucket"
+          key            = "path/to/terraform.tfstate"
+          region         = "${AWS::Region}"
+          encrypt        = true
+          dynamodb_table = "${TerraformStateLockTable}"
+        }
+      }
